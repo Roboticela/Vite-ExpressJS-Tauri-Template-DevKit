@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      draft:
+        description: "Create as draft release?"
+        required: false
+        type: boolean
+        default: false
 
 # Optional secrets for Android signing:
 #   ANDROID_KEYSTORE_BASE64   — base64-encoded .keystore file
@@ -113,6 +118,7 @@ jobs:
         if: matrix.cross == true
         run: |
           sudo dpkg --add-architecture ${{ matrix.deb-arch }}
+          sudo add-apt-repository -y universe
           sudo apt-get update
 
       - name: Install system dependencies (native)
@@ -131,8 +137,10 @@ jobs:
         if: matrix.arch == 'i686'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            gcc-i686-linux-gnu g++-i686-linux-gnu \
+          # Install C cross-compiler only (provides i686-linux-gnu-gcc). Skip g++ to avoid
+          # strict version dependency on gcc-11-i686-linux-gnu that may be missing on some mirrors.
+          sudo apt-get install -y --no-install-recommends \
+            gcc-11-i686-linux-gnu \
             gcc-multilib g++-multilib \
             libwebkit2gtk-4.1-dev:i386 \
             librsvg2-dev:i386 \
@@ -455,12 +463,23 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.exe' -o -name '*.msi' -o -name '*.apk' -o -name '*.aab' \) -exec sha256sum {} \; | sort -k2 > SHA256SUMS
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.exe' -o -name '*.msi' -o -name '*.apk' -o -name '*.aab' \) -exec sha512sum {} \; | sort -k2 > SHA512SUMS
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
+          echo "--- SHA512SUMS ---"
+          cat SHA512SUMS
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: ${{ env.APP_NAME }} v${{ github.event.inputs.version }}
           prerelease: ${{ github.event.inputs.prerelease }}
+          draft: ${{ github.event.inputs.draft }}
           generate_release_notes: true
           body: |
             ## ${{ env.APP_NAME }} v${{ github.event.inputs.version }}
@@ -477,8 +496,18 @@ jobs:
             | Windows | aarch64 (ARM64) | `.exe` (NSIS installer), `.msi` |
             | Android | arm64-v8a, armeabi-v7a, x86, x86_64 | `.apk` (per-ABI), `.aab` |
 
+            ### Verify downloads
+            `SHA256SUMS` and `SHA512SUMS` are included so you can verify file integrity:
+            ```bash
+            sha256sum -c SHA256SUMS
+            # or
+            sha512sum -c SHA512SUMS
+            ```
+
             > **Android signing:** ${{ needs.build-android.result == 'success' && 'Signed (see build log for keystore source)' || 'Build failed' }}
           files: |
+            artifacts/SHA256SUMS
+            artifacts/SHA512SUMS
             artifacts/linux-x86_64-artifacts/**/*
             artifacts/linux-aarch64-artifacts/**/*
             artifacts/linux-i686-artifacts/**/*
