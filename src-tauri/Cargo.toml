@@ -1,6 +1,6 @@
 [package]
 name = "roboticela-devkit"
-version = "0.1.0"
+version = "1.0.0"
 description = "Roboticela DevKit"
 authors = ["Roboticela"]
 license = ""
