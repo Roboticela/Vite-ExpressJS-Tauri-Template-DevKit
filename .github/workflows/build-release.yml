@@ -17,6 +17,31 @@ on:
         required: false
         type: boolean
         default: false
+      build_linux:
+        description: "Build for Linux (.deb, .rpm, .AppImage)"
+        required: false
+        type: boolean
+        default: true
+      build_windows:
+        description: "Build for Windows (.exe, .msi)"
+        required: false
+        type: boolean
+        default: true
+      build_android:
+        description: "Build for Android (.apk, .aab)"
+        required: false
+        type: boolean
+        default: true
+      build_macos:
+        description: "Build for macOS — coming soon"
+        required: false
+        type: boolean
+        default: false
+      build_ios:
+        description: "Build for iOS — coming soon"
+        required: false
+        type: boolean
+        default: false
 
 # Optional secrets for Android signing:
 #   ANDROID_KEYSTORE_BASE64   — base64-encoded .keystore file
@@ -72,14 +97,14 @@ jobs:
           path: .
 
   # ─────────────────────────────────────────────
-  # Linux — x86_64, aarch64, i686, armv7
+  # Linux — x86_64, aarch64, armv7
   #   x86_64 / aarch64 : native runners
-  #   i686              : cross-compiled on ubuntu-22.04 (x86_64 runner)
   #   armv7             : cross-compiled on ubuntu-22.04-arm (aarch64 runner)
   # ─────────────────────────────────────────────
   build-linux:
     name: Linux (${{ matrix.arch }})
     needs: prepare
+    if: github.event.inputs.build_linux == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -95,11 +120,6 @@ jobs:
             rust-target: aarch64-unknown-linux-gnu
             cross: false
             deb-arch: ""
-          - arch: i686
-            runner: ubuntu-22.04
-            rust-target: i686-unknown-linux-gnu
-            cross: true
-            deb-arch: i386
           - arch: armv7
             runner: ubuntu-22.04-arm
             rust-target: armv7-unknown-linux-gnueabihf
@@ -133,20 +153,6 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
-      - name: Install system dependencies (cross i686)
-        if: matrix.arch == 'i686'
-        run: |
-          sudo apt-get update
-          # Install C cross-compiler only (provides i686-linux-gnu-gcc). Skip g++ to avoid
-          # strict version dependency on gcc-11-i686-linux-gnu that may be missing on some mirrors.
-          sudo apt-get install -y --no-install-recommends \
-            gcc-11-i686-linux-gnu \
-            gcc-multilib g++-multilib \
-            libwebkit2gtk-4.1-dev:i386 \
-            librsvg2-dev:i386 \
-            libsoup-3.0-dev:i386 \
-            patchelf
-
       - name: Install system dependencies (cross armv7)
         if: matrix.arch == 'armv7'
         run: |
@@ -160,15 +166,9 @@ jobs:
       - name: Configure cross-compilation environment
         if: matrix.cross == true
         run: |
-          if [ "${{ matrix.arch }}" = "i686" ]; then
-            echo "PKG_CONFIG_ALLOW_CROSS=1"                                    >> $GITHUB_ENV
-            echo "PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig"           >> $GITHUB_ENV
-            echo "CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=i686-linux-gnu-gcc" >> $GITHUB_ENV
-          elif [ "${{ matrix.arch }}" = "armv7" ]; then
-            echo "PKG_CONFIG_ALLOW_CROSS=1"                                    >> $GITHUB_ENV
-            echo "PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig"      >> $GITHUB_ENV
-            echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV
-          fi
+          echo "PKG_CONFIG_ALLOW_CROSS=1"                                    >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig"      >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV
 
       - uses: actions/setup-node@v4
         with:
@@ -207,6 +207,7 @@ jobs:
   build-windows:
     name: Windows (${{ matrix.arch }})
     needs: prepare
+    if: github.event.inputs.build_windows == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -264,6 +265,7 @@ jobs:
   build-android:
     name: Android
     needs: prepare
+    if: github.event.inputs.build_android == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -450,18 +452,42 @@ jobs:
   # ─────────────────────────────────────────────
   release:
     name: GitHub Release
-    needs: [build-linux, build-windows, build-android]
+    needs: [prepare, build-linux, build-windows, build-android]
+    if: |
+      always() && !cancelled() &&
+      needs.build-linux.result != 'failure' &&
+      needs.build-windows.result != 'failure' &&
+      needs.build-android.result != 'failure' &&
+      (github.event.inputs.build_linux == 'true' ||
+       github.event.inputs.build_windows == 'true' ||
+       github.event.inputs.build_android == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Download Linux artifacts
+        if: needs.build-linux.result == 'success'
         uses: actions/download-artifact@v4
         with:
+          pattern: linux-*-artifacts
+          path: artifacts
+
+      - name: Download Windows artifacts
+        if: needs.build-windows.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-*-artifacts
+          path: artifacts
+
+      - name: Download Android artifacts
+        if: needs.build-android.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: android-artifacts
           path: artifacts
 
       - name: List artifacts
-        run: find artifacts -type f | sort
+        run: find artifacts -type f 2>/dev/null | sort || true
 
       - name: Generate checksums
         run: |
@@ -489,12 +515,13 @@ jobs:
             |----------|-------------|--------|
             | Linux | x86_64 | `.deb`, `.rpm`, `.AppImage` |
             | Linux | aarch64 | `.deb`, `.rpm`, `.AppImage` |
-            | Linux | i686 (32-bit) | `.deb`, `.rpm`, `.AppImage` |
             | Linux | armv7 (32-bit ARM) | `.deb`, `.rpm`, `.AppImage` |
             | Windows | x86_64 | `.exe` (NSIS installer), `.msi` |
             | Windows | i686 (32-bit) | `.exe` (NSIS installer), `.msi` |
             | Windows | aarch64 (ARM64) | `.exe` (NSIS installer), `.msi` |
             | Android | arm64-v8a, armeabi-v7a, x86, x86_64 | `.apk` (per-ABI), `.aab` |
+            | macOS | — | *Coming soon* |
+            | iOS | — | *Coming soon* |
 
             ### Verify downloads
             `SHA256SUMS` and `SHA512SUMS` are included so you can verify file integrity:
@@ -505,16 +532,6 @@ jobs:
             ```
 
             > **Android signing:** ${{ needs.build-android.result == 'success' && 'Signed (see build log for keystore source)' || 'Build failed' }}
-          files: |
-            artifacts/SHA256SUMS
-            artifacts/SHA512SUMS
-            artifacts/linux-x86_64-artifacts/**/*
-            artifacts/linux-aarch64-artifacts/**/*
-            artifacts/linux-i686-artifacts/**/*
-            artifacts/linux-armv7-artifacts/**/*
-            artifacts/windows-x86_64-artifacts/**/*
-            artifacts/windows-i686-artifacts/**/*
-            artifacts/windows-aarch64-artifacts/**/*
-            artifacts/android-artifacts/**/**/*
+          files: artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
