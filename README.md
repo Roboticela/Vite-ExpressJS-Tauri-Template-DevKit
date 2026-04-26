@@ -124,6 +124,8 @@ xcode-select --install
 #### Android (local)
 - JDK 17, Android SDK, NDK (e.g. 27.0.12077973 as in workflow)
 - `npx tauri android init` once; see [Tauri Android](https://v2.tauri.app/develop/android/)
+- **Windows only:** enable [Developer Mode](https://learn.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development) (Settings → System → For developers). Tauri links `libapp_lib.so` into `src-tauri/gen/android/.../jniLibs` with a **symbolic link**; without Developer Mode (or the “create symbolic links” privilege) the build fails with *“Creation symbolic link is not allowed for this system”* ([upstream discussion](https://github.com/tauri-apps/tauri/issues/10937)). Keep the project on an **NTFS** drive (not exFAT/FAT32 on external disks).
+- If Gradle/Kotlin reports *“this and base files have different roots”* (e.g. repo on **D:** and Cargo/registry on **C:**), the Kotlin daemon may fall back; builds can still succeed. If problems persist, put the **project on the same drive** as your user profile (where `.cargo` lives) or add `kotlin.incremental=false` in `src-tauri/gen/android/gradle.properties` after `tauri android init` (re-apply if you regenerate `gen/android`).
 
 ---
 

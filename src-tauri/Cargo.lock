@@ -2878,13 +2878,14 @@ dependencies = [
 
 [[package]]
 name = "roboticela-devkit"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "log",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-android-ui",
  "tauri-plugin-log",
 ]
 
@@ -3639,6 +3640,16 @@ dependencies = [
  "tauri-utils",
  "toml 0.9.12+spec-1.1.0",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-android-ui"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
